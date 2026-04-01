@@ -16,7 +16,7 @@
 | **Auth** | Firebase Auth (Google Sign-In) |
 | **AI Engine** | Google Gemini 1.5 Flash |
 | **Agent Count** | 4 agents (MVP, expandable to 8) |
-| **Package Name** | `com.sooubh.swarm-ai` |
+| **Package Name** | `com.sooubh.swarmai` |
 
 ### MVP Core Flow
 ```
