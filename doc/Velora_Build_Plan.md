@@ -1,5 +1,5 @@
-# 🔬 VELORA — Complete AI Vibe Coding Build Plan
-**Personal Research Assistant Swarm | Flutter + FastAPI + Firebase + Gemini**
+# 🔬 SWARM AI — Complete AI Vibe Coding Build Plan
+**Personal Research Assistant | Flutter + FastAPI + Firebase + Gemini**
 
 > This plan is written for AI-agent vibe coding. Every task is small, isolated, and independently buildable. Follow phases in order. Do not skip phases.
 
@@ -9,14 +9,14 @@
 
 | Item | Detail |
 |---|---|
-| **App Name** | Velora |
+| **App Name** | Swarm AI |
 | **Platform** | Flutter Android (MVP) |
 | **Backend** | Python FastAPI |
 | **Database** | Firebase Firestore |
 | **Auth** | Firebase Auth (Google Sign-In) |
 | **AI Engine** | Google Gemini 1.5 Flash |
 | **Agent Count** | 4 agents (MVP, expandable to 8) |
-| **Package Name** | `com.sooubh.velora` |
+| **Package Name** | `com.sooubh.swarm-ai` |
 
 ### MVP Core Flow
 ```
@@ -289,7 +289,7 @@ Analyzed data: {analyzed_data}
 
 ### Task F1 — Project Setup
 ```
-- Create Flutter project: flutter create velora --org com.sooubh
+- Create Flutter project: flutter create swarm-ai --org com.sooubh
 - Add all packages from pubspec.yaml above
 - Setup Firebase: flutterfire configure
 - Create folder structure as defined above
@@ -371,7 +371,7 @@ class FinalReport {
 ### Task F6 — Splash Screen
 **File:** `lib/features/auth/presentation/splash_screen.dart`
 ```
-- Full screen dark background with Velora logo (text + icon)
+- Full screen dark background with Swarm AI logo (text + icon)
 - Check Firebase auth state
 - If logged in → go to HomeScreen
 - If not → go to LoginScreen
@@ -382,7 +382,7 @@ class FinalReport {
 **File:** `lib/features/auth/presentation/login_screen.dart`
 ```
 - Dark full-screen layout
-- Velora logo at top center
+- Swarm AI logo at top center
 - Tagline: "Research powered by AI agents"
 - Google Sign-In button (white button, Google icon)
 - Loading state during sign-in
@@ -394,7 +394,7 @@ class FinalReport {
 **File:** `lib/features/research/presentation/home_screen.dart`
 ```
 UI Layout:
-- AppBar: "Velora" title + user avatar (top right) with logout option
+- AppBar: "Swarm AI" title + user avatar (top right) with logout option
 - Greeting text: "What do you want to research?"
 - Large text input field (multiline, max 500 chars) with violet border
 - Submit button: "Start Research" (full width, violet gradient)
@@ -636,7 +636,7 @@ flutter build appbundle --release
 - [ ] T2 — Flutter + backend integration
 - [ ] T3 — Polish + error handling
 
-**Total: 28 small tasks → Complete MVP Velora App**
+**Total: 28 small tasks → Complete MVP Swarm AI App**
 
 ---
 
