@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "8755840102",
+    "project_id": "swarmai7",
+    "storage_bucket": "swarmai7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:8755840102:android:1de864d23795efde28d9a7",
+        "android_client_info": {
+          "package_name": "com.sooubh.swarm_ai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB8UTdMP45zHH-wEHL4AhBFN0QL8-iGO1U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
