@@ -63,6 +63,89 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Widget _buildDemoResearchList() {
+    final demoItems = [
+      {
+        'jobId': 'demo1',
+        'query': 'Latest advancements in quantum computing',
+        'status': 'completed',
+        'createdAt': DateTime.now().subtract(const Duration(hours: 2)),
+      },
+      {
+        'jobId': 'demo2',
+        'query': 'Impact of AI on healthcare industry',
+        'status': 'completed',
+        'createdAt': DateTime.now().subtract(const Duration(hours: 5)),
+      },
+      {
+        'jobId': 'demo3',
+        'query': 'Sustainable energy solutions for 2030',
+        'status': 'running',
+        'createdAt': DateTime.now().subtract(const Duration(hours: 1)),
+      },
+      {
+        'jobId': 'demo4',
+        'query': 'Blockchain technology applications beyond cryptocurrency',
+        'status': 'completed',
+        'createdAt': DateTime.now().subtract(const Duration(days: 1)),
+      },
+      {
+        'jobId': 'demo5',
+        'query': 'Climate change mitigation strategies',
+        'status': 'failed',
+        'createdAt': DateTime.now().subtract(const Duration(days: 2)),
+      },
+      {
+        'jobId': 'demo6',
+        'query': 'Future of remote work and digital nomadism',
+        'status': 'completed',
+        'createdAt': DateTime.now().subtract(const Duration(days: 3)),
+      },
+      {
+        'jobId': 'demo7',
+        'query': 'Advancements in renewable energy storage',
+        'status': 'running',
+        'createdAt': DateTime.now().subtract(const Duration(hours: 3)),
+      },
+      {
+        'jobId': 'demo8',
+        'query': 'The role of AI in education',
+        'status': 'completed',
+        'createdAt': DateTime.now().subtract(const Duration(days: 1, hours: 2)),
+      },
+    ];
+
+    return ListView.separated(
+      itemCount: demoItems.length,
+      separatorBuilder: (_, index) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        final item = demoItems[index];
+        final jobId = item['jobId'] as String;
+        final query = item['query'] as String;
+        final status = item['status'] as String;
+        final createdAt = item['createdAt'] as DateTime;
+
+        return Card(
+          child: ListTile(
+            title: Text(
+              query,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(_formatDate(createdAt)),
+            trailing: _StatusChip(status: status),
+            onTap: () {
+              final target = status == 'completed'
+                  ? '/report/$jobId'
+                  : '/progress/$jobId';
+              context.push(target);
+            },
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -140,60 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: uid == null
                   ? const Center(child: Text('Sign in to see history'))
-                  : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: FirebaseFirestore.instance
-                          .collection('research')
-                          .where('userId', isEqualTo: uid)
-                          .orderBy('createdAt', descending: true)
-                          .limit(20)
-                          .snapshots(),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-
-                        if (snapshot.hasError) {
-                          return const Center(child: Text('Failed to load history'));
-                        }
-
-                        final docs = snapshot.data?.docs ?? [];
-                        if (docs.isEmpty) {
-                          return const Center(child: Text('No recent research yet.'));
-                        }
-
-                        return ListView.separated(
-                          itemCount: docs.length,
-                          separatorBuilder: (_, index) => const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final item = docs[index].data();
-                            final jobId = docs[index].id;
-                            final query = (item['query'] ?? 'Untitled query').toString();
-                            final status = (item['status'] ?? 'running').toString();
-                            final createdAt = item['createdAt'] is Timestamp
-                                ? (item['createdAt'] as Timestamp).toDate()
-                                : null;
-
-                            return Card(
-                              child: ListTile(
-                                title: Text(
-                                  query,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Text(_formatDate(createdAt)),
-                                trailing: _StatusChip(status: status),
-                                onTap: () {
-                                  final target = status == 'completed'
-                                      ? '/report/$jobId'
-                                      : '/progress/$jobId';
-                                  context.push(target);
-                                },
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
+                  : _buildDemoResearchList(),
             ),
           ],
         ),

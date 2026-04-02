@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../data/research_api.dart';
 import '../domain/research_model.dart';
@@ -67,6 +70,202 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
+  Future<void> _downloadPdf() async {
+    final report = _report;
+    if (report == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No report data available')),
+      );
+      return;
+    }
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Generating PDF...')),
+      );
+
+      final pdf = pw.Document();
+
+      // Create PDF with proper page handling
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          build: (pw.Context context) {
+            return [
+              // Title
+              pw.Header(
+                level: 0,
+                child: pw.Text(
+                  'Swarm AI Research Report',
+                  style: pw.TextStyle(
+                    fontSize: 24,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.blue900,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Query
+              pw.Text(
+                'Research Query:',
+                style: pw.TextStyle(
+                  fontSize: 14,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.grey700,
+                ),
+              ),
+              pw.Text(
+                report.query,
+                style: const pw.TextStyle(fontSize: 16),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Summary Section
+              pw.Header(
+                level: 1,
+                child: pw.Text(
+                  'Executive Summary',
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.blue800,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                report.summary,
+                style: const pw.TextStyle(fontSize: 12, lineSpacing: 1.5),
+                textAlign: pw.TextAlign.justify,
+              ),
+              pw.SizedBox(height: 20),
+
+              // Sections
+              pw.Header(
+                level: 1,
+                child: pw.Text(
+                  'Detailed Analysis',
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.blue800,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 15),
+
+              // Generate sections
+              ...report.sections.map((section) => pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Header(
+                    level: 2,
+                    child: pw.Text(
+                      section.title,
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blue700,
+                      ),
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    section.content,
+                    style: const pw.TextStyle(fontSize: 11, lineSpacing: 1.4),
+                    textAlign: pw.TextAlign.justify,
+                  ),
+                  if (section.sources.isNotEmpty) ...[
+                    pw.SizedBox(height: 10),
+                    pw.Text(
+                      'Sources:',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.grey600,
+                      ),
+                    ),
+                    pw.SizedBox(height: 5),
+                    ...section.sources.map((source) => pw.Container(
+                      margin: const pw.EdgeInsets.only(bottom: 3),
+                      child: pw.Text(
+                        source,
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          color: PdfColors.blue600,
+                          decoration: pw.TextDecoration.underline,
+                        ),
+                      ),
+                    )),
+                  ],
+                  pw.SizedBox(height: 15),
+                ],
+              )),
+
+              // Footer with total sources
+              pw.Container(
+                margin: const pw.EdgeInsets.only(top: 20),
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'Generated by Swarm AI',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        color: PdfColors.grey600,
+                        fontStyle: pw.FontStyle.italic,
+                      ),
+                    ),
+                    pw.Text(
+                      'Total Sources: ${report.totalSources}',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ];
+          },
+        ),
+      );
+
+      // Save PDF bytes
+      final bytes = await pdf.save();
+
+      if (bytes.isEmpty) {
+        throw Exception('PDF generation resulted in empty bytes');
+      }
+
+      // Share the PDF
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'swarm_ai_report_${report.jobId}.pdf',
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PDF downloaded successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to generate PDF: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -87,6 +286,10 @@ class _ReportScreenState extends State<ReportScreen> {
                     );
                   },
             icon: const Icon(Icons.share_rounded),
+          ),
+          IconButton(
+            onPressed: _report == null ? null : _downloadPdf,
+            icon: const Icon(Icons.download_rounded),
           ),
         ],
       ),
