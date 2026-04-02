@@ -12,7 +12,20 @@
           "package_name": "com.sooubh.swarm_ai"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "8755840102-f0qp0p4k1rmqs23vg839vvb38j1f99e9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sooubh.swarm_ai",
+            "certificate_hash": "48a11c3b7517bfdf0b05e55438f1b8e3cf97b5ab"
+          }
+        },
+        {
+          "client_id": "8755840102-8ckvknsj5hhg47kvm298r6vuct8hvuk0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyB8UTdMP45zHH-wEHL4AhBFN0QL8-iGO1U"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "8755840102-8ckvknsj5hhg47kvm298r6vuct8hvuk0.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "8755840102-vqjseajjoc08g67p0t3krgjv7pt2a72t.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.sooubh.swarmAi"
+              }
+            }
+          ]
         }
       }
     }

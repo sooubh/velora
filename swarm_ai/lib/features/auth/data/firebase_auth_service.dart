@@ -1,10 +1,13 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart';
 
 class FirebaseAuthService {
   FirebaseAuthService({FirebaseAuth? auth, GoogleSignIn? googleSignIn})
       : _auth = auth ?? FirebaseAuth.instance,
-        _googleSignIn = googleSignIn ?? GoogleSignIn();
+        _googleSignIn = googleSignIn ?? GoogleSignIn(
+            clientId: kIsWeb ? '8755840102-8ckvknsj5hhg47kvm298r6vuct8hvuk0.apps.googleusercontent.com' : null,
+          );
 
   final FirebaseAuth _auth;
   final GoogleSignIn _googleSignIn;
