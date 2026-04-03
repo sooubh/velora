@@ -32,8 +32,7 @@ Create `.env` file (copy from `.env.example`):
 ```bash
 # Required
 GEMINI_API_KEY=sk-proj-xxxxxxxxxxxxx
-GOOGLE_SEARCH_API_KEY=xxxxxxxxxxxxx
-GOOGLE_SEARCH_ENGINE_ID=xxxxxxxxxxxxx
+TAVILY_API_KEY=tvly-xxxxxxxxxxxxx
 
 # Firebase
 FIREBASE_PROJECT_ID=velora-xxx
@@ -52,9 +51,12 @@ FIREBASE_CREDENTIALS_PATH=./firebase-key.json
 - https://aistudio.google.com/
 - Get API key from settings
 
-**Google Custom Search:**
-- https://programmablesearchengine.google.com/
-- Create search engine, get API key from Google Cloud Console
+**Tavily API:**
+- https://app.tavily.com/
+- Create API key from dashboard
+
+**DuckDuckGo Search:**
+- No API key required (used as additional/fallback source)
 
 ## Running the Server
 
@@ -138,7 +140,7 @@ backend/
 │   └── report_writer.py     # Report generation
 ├── services/
 │   ├── gemini_service.py    # Gemini client
-│   ├── search_service.py    # Google Search wrapper
+│   ├── search_service.py    # Tavily + DuckDuckGo search wrapper
 │   └── firebase_service.py  # Firestore wrapper
 ├── models/
 │   └── research_model.py    # Pydantic models

@@ -26,6 +26,7 @@ from agents.web_search_agent import WebSearchAgent
 from agents.analyzer_agent import AnalyzerAgent
 from agents.report_writer import ReportWriterAgent
 from services.firebase_service import save_research, get_research
+from services.search_service import get_search_provider_status
 from models.research_model import ResearchRequest, ResearchReport, ResearchStatus
 
 # Initialize FastAPI
@@ -97,7 +98,11 @@ class ResearchResponse(BaseModel):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "search": get_search_provider_status(),
+    }
 
 @app.post("/research/start")
 async def start_research(request: ResearchRequest) -> ResearchResponse:
