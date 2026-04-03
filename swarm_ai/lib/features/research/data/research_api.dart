@@ -10,9 +10,9 @@ class ResearchApi {
             Dio(
               BaseOptions(
                 baseUrl: ApiConstants.baseUrl,
-                connectTimeout: const Duration(seconds: 20),
-                receiveTimeout: const Duration(seconds: 30),
-                sendTimeout: const Duration(seconds: 20),
+                connectTimeout: const Duration(seconds: 60),
+                receiveTimeout: const Duration(seconds: 90),
+                sendTimeout: const Duration(seconds: 60),
                 headers: const <String, String>{
                   'Content-Type': 'application/json',
                 },
@@ -37,7 +37,37 @@ class ResearchApi {
     required String query,
     required String userId,
   }) async {
-    final jobId = 'user_${DateTime.now().millisecondsSinceEpoch}';
+    Response<dynamic> response;
+    try {
+      response = await _dio.post(
+        ApiConstants.startResearchPath,
+        data: <String, dynamic>{
+          'query': query,
+          'user_id': userId,
+        },
+      );
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        throw Exception(
+          'Cannot reach backend at ${ApiConstants.baseUrl}. '
+          'If you are using a physical Android device, run with '
+          '--dart-define=API_BASE_URL=http://<YOUR_PC_IP>:8000',
+        );
+      }
+      rethrow;
+    }
+
+    final data = response.data;
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Invalid start research response');
+    }
+
+    final jobId = (data['research_id'] ?? '').toString();
+    if (jobId.isEmpty) {
+      throw Exception('Missing research_id in response');
+    }
+
     _userQueries[jobId] = query;
     _jobStartTimes[jobId] = DateTime.now();
     return jobId;
@@ -49,33 +79,26 @@ class ResearchApi {
       return _getDemoJobStatus(jobId);
     }
 
-    // For user queries, simulate progress
-    return _getSimulatedJobStatus(jobId);
-  }
-
-  ResearchJob _getSimulatedJobStatus(String jobId) {
-    final startTime = _jobStartTimes[jobId] ?? DateTime.now();
-    final elapsed = DateTime.now().difference(startTime).inSeconds;
-
-    String status;
-    if (elapsed < 10) {
-      status = 'running';
-    } else if (elapsed < 20) {
-      status = 'agent_2_running';
-    } else if (elapsed < 30) {
-      status = 'agent_3_running';
-    } else if (elapsed < 40) {
-      status = 'agent_4_running';
-    } else {
-      status = 'completed';
+    final response = await _dio.get(ApiConstants.jobStatusPath(jobId));
+    final data = response.data;
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Invalid job status response');
     }
 
-    return ResearchJob(
-      jobId: jobId,
-      query: _userQueries[jobId] ?? 'Your research query',
-      status: status,
-      createdAt: startTime,
-    );
+    final normalized = <String, dynamic>{
+      'job_id': (data['research_id'] ?? jobId).toString(),
+      'query': (data['query'] ?? _userQueries[jobId] ?? '').toString(),
+      'status': (data['status'] ?? 'pending').toString(),
+      'created_at': (data['created_at'] ?? _jobStartTimes[jobId]?.toIso8601String() ?? DateTime.now().toIso8601String()).toString(),
+      'progress': data['progress'] ?? 0,
+      'phase': data['phase'] ?? '',
+      'message': data['message'],
+      'error_message': data['error_message'],
+      'logs': data['logs'] is List ? data['logs'] : const <dynamic>[],
+      'agents': data['agents'] is List ? data['agents'] : const <dynamic>[],
+    };
+
+    return ResearchJob.fromJson(normalized);
   }
 
   ResearchJob _getDemoJobStatus(String jobId) {
@@ -144,8 +167,42 @@ class ResearchApi {
       return _getDemoReport(jobId);
     }
 
-    // For user queries, generate AI-powered report
-    return _generateAIReport(jobId);
+    final response = await _dio.get(ApiConstants.reportPath(jobId));
+    final data = response.data;
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Invalid report response');
+    }
+
+    final status = (data['status'] ?? '').toString();
+    if (status != 'completed') {
+      throw Exception('Report is not ready yet');
+    }
+
+    final report = data['report'];
+    if (report is! Map<String, dynamic>) {
+      throw Exception('Missing report data');
+    }
+
+    final rawSections = report['sections'];
+    final sections = rawSections is List
+        ? rawSections
+              .whereType<Map<String, dynamic>>()
+              .map(ReportSection.fromJson)
+              .toList(growable: false)
+        : const <ReportSection>[];
+
+    final totalSources = sections.fold<int>(
+      0,
+      (sum, section) => sum + section.sources.length,
+    );
+
+    return FinalReport(
+      jobId: (data['research_id'] ?? jobId).toString(),
+      query: (data['query'] ?? '').toString(),
+      summary: (report['summary'] ?? '').toString(),
+      sections: sections,
+      totalSources: totalSources,
+    );
   }
 
   Future<FinalReport> _generateAIReport(String jobId) async {

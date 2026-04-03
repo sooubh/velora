@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "8755840102-kqffpbobj91u6m3om7i7fs7mvdgvq194.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sooubh.swarm_ai",
+            "certificate_hash": "d178e8a519fbc92d7f2b5c39a9de9e837cb31bd3"
+          }
+        },
+        {
           "client_id": "8755840102-8ckvknsj5hhg47kvm298r6vuct8hvuk0.apps.googleusercontent.com",
           "client_type": 3
         }

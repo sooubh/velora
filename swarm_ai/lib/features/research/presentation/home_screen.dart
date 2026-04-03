@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dio/dio.dart';
 
 import '../../auth/data/firebase_auth_service.dart';
 import '../data/research_api.dart';
@@ -42,12 +42,12 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       context.push('/progress/$jobId');
       _queryController.clear();
-    } catch (_) {
+    } catch (e) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to start research.')),
+        SnackBar(content: Text(_formatStartError(e))),
       );
     } finally {
       if (mounted) {
@@ -61,6 +61,27 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) {
       context.go('/login');
     }
+  }
+
+  String _formatStartError(Object error) {
+    if (error is DioException) {
+      final responseData = error.response?.data;
+
+      if (responseData is Map<String, dynamic>) {
+        final detail = responseData['detail']?.toString();
+        if (detail != null && detail.isNotEmpty) {
+          return 'Failed to start research: $detail';
+        }
+      }
+
+      if (error.type == DioExceptionType.connectionError) {
+        return 'Failed to start research: cannot reach backend. Ensure API is running on port 8000.';
+      }
+
+      return 'Failed to start research: ${error.message ?? 'request error'}';
+    }
+
+    return 'Failed to start research: ${error.toString()}';
   }
 
   Widget _buildDemoResearchList() {

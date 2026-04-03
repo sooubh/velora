@@ -4,6 +4,11 @@ class ResearchJob {
     required this.query,
     required this.status,
     required this.createdAt,
+    this.progress = 0,
+    this.phase = '',
+    this.message,
+    this.errorMessage,
+    this.logs = const <String>[],
     this.agents = const <AgentProgress>[],
   });
 
@@ -11,16 +16,31 @@ class ResearchJob {
   final String query;
   final String status;
   final DateTime createdAt;
+  final int progress;
+  final String phase;
+  final String? message;
+  final String? errorMessage;
+  final List<String> logs;
   final List<AgentProgress> agents;
 
   factory ResearchJob.fromJson(Map<String, dynamic> json) {
     final rawAgents = json['agents'];
+    final rawLogs = json['logs'];
     return ResearchJob(
       jobId: (json['job_id'] ?? json['jobId'] ?? '').toString(),
       query: (json['query'] ?? '').toString(),
       status: (json['status'] ?? '').toString(),
       createdAt: DateTime.tryParse((json['created_at'] ?? '').toString()) ??
           DateTime.now(),
+        progress: json['progress'] is int
+          ? json['progress'] as int
+          : int.tryParse((json['progress'] ?? '').toString()) ?? 0,
+        phase: (json['phase'] ?? '').toString(),
+        message: json['message']?.toString(),
+      errorMessage: json['error_message']?.toString(),
+      logs: rawLogs is List
+          ? rawLogs.map((log) => log.toString()).toList(growable: false)
+          : const <String>[],
       agents: rawAgents is List
           ? rawAgents
                 .whereType<Map<String, dynamic>>()
@@ -36,6 +56,11 @@ class ResearchJob {
       'query': query,
       'status': status,
       'created_at': createdAt.toIso8601String(),
+      'progress': progress,
+      'phase': phase,
+      'message': message,
+      'error_message': errorMessage,
+      'logs': logs,
       'agents': agents.map((agent) => agent.toJson()).toList(growable: false),
     };
   }
