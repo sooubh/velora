@@ -89,11 +89,14 @@ Return ONLY JSON with this structure:
 
 {payload}
 
-Rank sources by credibility and provide conflict decisions."""
+Rank sources by credibility and provide conflict decisions.
+Be dense and concise. Avoid repetition."""
 
     SYNTHESIS_SYSTEM = """You are a Synthesis agent.
 Create the final markdown report from conflict-resolved analysis.
-Use clear structure, balanced reasoning, and include citations as [Source: URL]."""
+Use clear structure, balanced reasoning, and include citations as [Source: URL].
+Optimize for high information density and low token usage.
+Prefer factual precision over style fluff."""
 
     SYNTHESIS_PROMPT = """User query: {query}
 
@@ -107,8 +110,19 @@ Write a report with these sections:
 - Executive Summary
 - Key Findings
 - Detailed Analysis
+- Comparative Table
+- Visual References
 - Conflicts and Caveats
 - Conclusion
+- Citations
+
+Constraints:
+- Target 1200-1800 words.
+- Use short, evidence-dense paragraphs.
+- No filler or repeated phrasing.
+- Include at least one markdown table.
+- Include image references as markdown image links if URLs are available.
+- Include a numbered citations list at the end with URLs.
 """
 
     COHERENCE_SCORER_SYSTEM = """You are a Coherence Scorer agent.

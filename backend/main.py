@@ -35,7 +35,9 @@ from agents.coherence_scorer_agent import CoherenceScorerAgent
 from services.firebase_service import save_research, get_research
 from services.search_service import get_search_provider_status
 from services.pinecone_service import get_pinecone_status, upsert_evidence_chunks, query_evidence
+from services.gemini_service import get_cache_stats
 from models.research_model import ResearchRequest, ResearchReport, ResearchStatus
+from utils.payload_optimizer import truncate_text, estimate_tokens
 
 # Initialize FastAPI
 app = FastAPI(
@@ -46,6 +48,12 @@ app = FastAPI(
 
 DEBUG_MODE = os.environ.get("DEBUG", "false").lower() == "true"
 SERVER_PORT = int(os.environ.get("PORT", 8000))
+MAX_SPECIALIST_SUMMARY_CHARS = int(os.environ.get("MAX_SPECIALIST_SUMMARY_CHARS", "700"))
+MAX_MEMORY_MATCHES = int(os.environ.get("MAX_MEMORY_MATCHES", "6"))
+MAX_MEMORY_TEXT_CHARS = int(os.environ.get("MAX_MEMORY_TEXT_CHARS", "220"))
+MAX_ANALYSIS_INPUT_CHARS = int(os.environ.get("MAX_ANALYSIS_INPUT_CHARS", "7000"))
+FAST_MODEL = os.environ.get("FAST_MODEL", os.environ.get("GENERATION_MODEL", "gemini-2.5-flash"))
+QUALITY_MODEL = os.environ.get("QUALITY_MODEL", FAST_MODEL)
 
 app.add_middleware(
     CORSMiddleware,
@@ -144,6 +152,7 @@ async def health_check():
         "debug": DEBUG_MODE,
         "search": get_search_provider_status(),
         "pinecone": get_pinecone_status(),
+        "llm_cache": get_cache_stats(),
     }
     if DEBUG_MODE:
         print(f"[DEBUG] /health status=ok port={SERVER_PORT}")
@@ -350,7 +359,8 @@ async def _run_research_pipeline(research_id: str):
         _track_step("analyzing", "Analyzing and synthesizing results...", 60)
 
         combined_results = "\n\n---\n\n".join([
-            f"[{s.get('agent_name', 'Specialist')}]\n{s.get('summary', '')}"
+            f"[{s.get('agent_name', 'Specialist')}]\n"
+            f"{truncate_text(str(s.get('summary', '')), MAX_SPECIALIST_SUMMARY_CHARS)}"
             for s in specialist_results
             if s.get('summary')
         ])
@@ -373,17 +383,24 @@ async def _run_research_pipeline(research_id: str):
         memory_context = ""
         if pinecone_query.get("success") and pinecone_query.get("matches"):
             lines = []
-            for idx, match in enumerate(pinecone_query.get("matches", [])[:8], 1):
+            for idx, match in enumerate(pinecone_query.get("matches", [])[:MAX_MEMORY_MATCHES], 1):
                 metadata = match.get("metadata", {}) if isinstance(match, dict) else {}
                 lines.append(
                     f"{idx}. [{metadata.get('agent', 'Unknown')}] "
                     f"{metadata.get('title', '')}\n"
                     f"   Source: {metadata.get('url', '')}\n"
-                    f"   Text: {metadata.get('text', '')}"
+                    f"   Text: {truncate_text(str(metadata.get('text', '')), MAX_MEMORY_TEXT_CHARS)}"
                 )
             memory_context = "\n\nPINECONE MEMORY CONTEXT\n" + "\n\n".join(lines)
 
-        analysis_input = combined_results + memory_context
+        analysis_input = truncate_text(combined_results + memory_context, MAX_ANALYSIS_INPUT_CHARS)
+        token_telemetry = {
+            "analysis_input_tokens_est": estimate_tokens(analysis_input),
+            "combined_results_tokens_est": estimate_tokens(combined_results),
+            "memory_context_tokens_est": estimate_tokens(memory_context),
+            "fast_model": FAST_MODEL,
+            "quality_model": QUALITY_MODEL,
+        }
 
         analysis_result = await analyzer.analyze(
             query=query,
@@ -426,6 +443,7 @@ async def _run_research_pipeline(research_id: str):
             analysis=analysis_result.get('analysis', {}),
             raw_sources=raw_sources,
             pinecone_matches=pinecone_query.get('matches', []),
+            model=FAST_MODEL,
         )
 
         resolved_analysis = {
@@ -450,7 +468,8 @@ async def _run_research_pipeline(research_id: str):
         report_result = await synthesis_agent.synthesize(
             query=query,
             analysis=resolved_analysis,
-            raw_sources=raw_sources
+            raw_sources=raw_sources,
+            model=FAST_MODEL,
         )
 
         if not report_result.get('success'):
@@ -475,6 +494,7 @@ async def _run_research_pipeline(research_id: str):
         first_score = await coherence_scorer.score(
             query=query,
             report_text=report_result.get("raw_report", "") or report_result.get("summary", ""),
+            model=FAST_MODEL,
         )
 
         retry_used = False
@@ -498,12 +518,14 @@ async def _run_research_pipeline(research_id: str):
                 analysis=resolved_analysis,
                 raw_sources=raw_sources,
                 additional_guidance=retry_guidance,
+                model=QUALITY_MODEL,
             )
 
             if retry_report.get("success"):
                 retry_score = await coherence_scorer.score(
                     query=query,
                     report_text=retry_report.get("raw_report", "") or retry_report.get("summary", ""),
+                    model=QUALITY_MODEL,
                 )
 
                 if float(retry_score.get("score", 0.0)) >= float(first_score.get("score", 0.0)):
@@ -558,6 +580,19 @@ async def _run_research_pipeline(research_id: str):
                 "score": final_score.get("score", 0.0),
                 "feedback": final_score.get("feedback", ""),
                 "gaps": final_score.get("gaps", []),
+            },
+            "rendering": {
+                "raw_markdown": report_result.get("raw_report", ""),
+                "citations": report_result.get("citations", []),
+                "image_urls": report_result.get("image_urls", []),
+                "table_count": report_result.get("table_count", 0),
+            },
+            "token_telemetry": {
+                **token_telemetry,
+                "final_report_tokens_est": estimate_tokens(
+                    report_result.get("raw_report", "") or report_result.get("summary", "")
+                ),
+                "cache": get_cache_stats(),
             },
             "sections": [
                 {

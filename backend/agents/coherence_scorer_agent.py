@@ -12,14 +12,14 @@ class CoherenceScorerAgent:
         self.name = "Coherence Scorer"
         self.system_prompt = PromptTemplates.COHERENCE_SCORER_SYSTEM
 
-    async def score(self, query: str, report_text: str) -> Dict[str, Any]:
+    async def score(self, query: str, report_text: str, model: str | None = None) -> Dict[str, Any]:
         prompt = PromptTemplates.COHERENCE_SCORER_PROMPT.format(
             query=query,
             report_text=report_text,
         )
 
         try:
-            result = await parse_json_response(self.system_prompt, prompt)
+            result = await parse_json_response(self.system_prompt, prompt, model=model)
             score = float(result.get("score", 0))
             return {
                 "success": True,

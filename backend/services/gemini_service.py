@@ -1,9 +1,76 @@
 import os
 import asyncio
+import time
+import hashlib
 from google import genai
 from google.genai import types
 
 _client = None
+_cache: dict[str, tuple[float, str]] = {}
+_cache_hits = 0
+_cache_misses = 0
+
+
+def _default_generation_model() -> str:
+    return os.environ.get('GENERATION_MODEL', 'gemini-2.5-flash')
+
+
+def _default_embedding_model() -> str:
+    return os.environ.get('EMBEDDING_MODEL', 'text-embedding-004')
+
+
+def _cache_enabled() -> bool:
+    return os.environ.get('ENABLE_LLM_CACHE', 'true').lower() == 'true'
+
+
+def _cache_ttl_seconds() -> int:
+    return int(os.environ.get('CACHE_TTL_SECONDS', '1800'))
+
+
+def _cache_max_items() -> int:
+    return int(os.environ.get('CACHE_MAX_ITEMS', '512'))
+
+
+def _cache_key(model_name: str, system_prompt: str, user_message: str) -> str:
+    raw = f"{model_name}\n{system_prompt}\n{user_message}".encode('utf-8', errors='ignore')
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _cache_get(key: str) -> str | None:
+    global _cache_hits, _cache_misses
+    if not _cache_enabled():
+        _cache_misses += 1
+        return None
+    row = _cache.get(key)
+    if not row:
+        _cache_misses += 1
+        return None
+    expires_at, value = row
+    if time.time() >= expires_at:
+        _cache.pop(key, None)
+        _cache_misses += 1
+        return None
+    _cache_hits += 1
+    return value
+
+
+def _cache_set(key: str, value: str):
+    if not _cache_enabled():
+        return
+    if len(_cache) >= _cache_max_items():
+        # Drop one arbitrary key to keep overhead low.
+        _cache.pop(next(iter(_cache)))
+    _cache[key] = (time.time() + _cache_ttl_seconds(), value)
+
+
+def get_cache_stats() -> dict:
+    return {
+        'enabled': _cache_enabled(),
+        'size': len(_cache),
+        'hits': _cache_hits,
+        'misses': _cache_misses,
+        'ttl_seconds': _cache_ttl_seconds(),
+    }
 
 def get_client():
     """Get or create Gemini client instance"""
@@ -15,7 +82,7 @@ def get_client():
         _client = genai.Client(api_key=api_key)
     return _client
 
-async def ask(system_prompt: str, user_message: str, model: str = 'gemini-2.5-flash', retries: int = 3) -> str:
+async def ask(system_prompt: str, user_message: str, model: str | None = None, retries: int = 3) -> str:
     """
     Ask Gemini a question with system prompt and retry logic.
     
@@ -28,12 +95,18 @@ async def ask(system_prompt: str, user_message: str, model: str = 'gemini-2.5-fl
     Returns:
         The model's response text
     """
+    model_name = model or _default_generation_model()
+    key = _cache_key(model_name, system_prompt, user_message)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
     for attempt in range(retries):
         try:
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     get_client().models.generate_content,
-                    model=model,
+                    model=model_name,
                     config=types.GenerateContentConfig(
                         system_instruction=system_prompt,
                     ),
@@ -41,13 +114,15 @@ async def ask(system_prompt: str, user_message: str, model: str = 'gemini-2.5-fl
                 ),
                 timeout=45,
             )
-            return response.text or ""
+            text = response.text or ""
+            _cache_set(key, text)
+            return text
         except Exception as e:
             if attempt == retries - 1:
                 raise
             await asyncio.sleep(1)
 
-async def ask_with_context(system_prompt: str, user_message: str, context: str = "", model: str = 'gemini-2.5-flash') -> str:
+async def ask_with_context(system_prompt: str, user_message: str, context: str = "", model: str | None = None) -> str:
     """
     Ask Gemini with additional context.
     
@@ -63,7 +138,7 @@ async def ask_with_context(system_prompt: str, user_message: str, context: str =
     full_prompt = f"{context}\n\n{user_message}" if context else user_message
     return await ask(system_prompt, full_prompt, model)
 
-async def parse_json_response(system_prompt: str, user_message: str, model: str = 'gemini-2.5-flash') -> dict:
+async def parse_json_response(system_prompt: str, user_message: str, model: str | None = None) -> dict:
     """
     Ask Gemini and parse JSON response.
     
@@ -106,7 +181,7 @@ async def parse_json_response(system_prompt: str, user_message: str, model: str 
 
 async def embed_texts(
     texts: list[str],
-    model: str = 'text-embedding-004',
+    model: str | None = None,
     output_dimensionality: int = 768,
 ) -> list[list[float]]:
     """
@@ -117,6 +192,8 @@ async def embed_texts(
     """
     if not texts:
         return []
+
+    model_name = model or _default_embedding_model()
 
     def _extract_vectors(response_obj) -> list[list[float]]:
         vectors: list[list[float]] = []
@@ -143,7 +220,7 @@ async def embed_texts(
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     get_client().models.embed_content,
-                    model=model,
+                    model=model_name,
                     contents=texts,
                     config=types.EmbedContentConfig(
                         output_dimensionality=output_dimensionality,
