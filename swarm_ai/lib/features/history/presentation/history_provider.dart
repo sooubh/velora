@@ -10,13 +10,15 @@ final researchHistoryProvider = StreamProvider<List<Map<String, dynamic>>>((ref)
   }
 
   return FirebaseFirestore.instance
+      .collection('users')
+      .doc(user.uid)
       .collection('research')
-      .where('userId', isEqualTo: user.uid)
-      .orderBy('createdAt', descending: true)
+      .orderBy('created_at', descending: true)
       .snapshots()
       .map((snapshot) => snapshot.docs.map((doc) {
             final data = doc.data();
-            data['job_id'] = doc.id;
+            data['job_id'] = (data['job_id'] ?? doc.id).toString();
+            data['created_at'] = (data['created_at'] ?? data['createdAt'] ?? '').toString();
             return data;
           }).toList(growable: false));
 });
