@@ -34,10 +34,51 @@ Create `.env` file (copy from `.env.example`):
 GEMINI_API_KEY=sk-proj-xxxxxxxxxxxxx
 TAVILY_API_KEY=tvly-xxxxxxxxxxxxx
 
+# Model tuning (cost/quality)
+GENERATION_MODEL=gemini-2.5-flash
+EMBEDDING_MODEL=text-embedding-004
+FAST_MODEL=gemini-2.5-flash
+QUALITY_MODEL=gemini-2.5-pro
+ENABLE_LLM_CACHE=true
+CACHE_TTL_SECONDS=1800
+CACHE_MAX_ITEMS=512
+
 # Firebase
 FIREBASE_PROJECT_ID=velora-xxx
 FIREBASE_CREDENTIALS_PATH=./firebase-key.json
+
+# Pinecone
+PINECONE_API_KEY=pcsk-xxxxxxxxxxxxx
+PINECONE_HOST=https://your-index-xxxxxxxx.svc.region.pinecone.io
+PINECONE_INDEX=velora-research
+PINECONE_NAMESPACE=default
+
+# Token budget controls
+COHERENCE_THRESHOLD=90
+MAX_SPECIALIST_SUMMARY_CHARS=700
+MAX_MEMORY_MATCHES=6
+MAX_MEMORY_TEXT_CHARS=220
+MAX_ANALYSIS_INPUT_CHARS=7000
 ```
+
+## Faster + Lower-Cost Defaults
+
+- Use `FAST_MODEL=gemini-2.5-flash` for normal stages.
+- Use `QUALITY_MODEL` only for coherence retry.
+- Keep `ENABLE_LLM_CACHE=true` to reuse repeated prompt responses.
+- Lower these values to cut tokens: `MAX_ANALYSIS_INPUT_CHARS`, `MAX_MEMORY_MATCHES`, `MAX_SPECIALIST_SUMMARY_CHARS`.
+
+## Open-Source Platform Recommendation
+
+If you want full open-source API infrastructure:
+
+1. `vLLM` for inference serving (OpenAI-compatible API)
+2. `LiteLLM` as gateway/router/fallback layer
+3. `Qdrant` for vector search (Pinecone alternative)
+4. `FastAPI` for orchestration (current backend)
+5. `Redis` for cache + queue
+
+This gives strong integration flexibility and better long-term cost control.
 
 ### 3. Set Up Firebase
 

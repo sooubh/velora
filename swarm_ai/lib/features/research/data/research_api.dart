@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 import '../../../core/constants/api_constants.dart';
@@ -25,6 +26,7 @@ class ResearchApi {
   late final GenerativeModel _geminiModel;
   final Map<String, String> _userQueries = {}; // Store queries for user jobs
   final Map<String, DateTime> _jobStartTimes = {}; // Track when jobs started
+  String _activeBaseUrl = ApiConstants.baseUrl;
 
   void _initializeGemini() {
     _geminiModel = GenerativeModel(
@@ -37,6 +39,8 @@ class ResearchApi {
     required String query,
     required String userId,
   }) async {
+    await ensureBackendConnection();
+
     Response<dynamic> response;
     try {
       response = await _dio.post(
@@ -49,8 +53,9 @@ class ResearchApi {
     } on DioException catch (e) {
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.connectionError) {
+        await checkConnectionStatus(logIfDebug: true);
         throw Exception(
-          'Cannot reach backend at ${ApiConstants.baseUrl}. '
+          'Cannot reach backend at $_activeBaseUrl. '
           'If you are using a physical Android device, run with '
           '--dart-define=API_BASE_URL=http://<YOUR_PC_IP>:8000',
         );
@@ -78,6 +83,8 @@ class ResearchApi {
     if (jobId.startsWith('demo')) {
       return _getDemoJobStatus(jobId);
     }
+
+    await ensureBackendConnection();
 
     final response = await _dio.get(ApiConstants.jobStatusPath(jobId));
     final data = response.data;
@@ -166,6 +173,8 @@ class ResearchApi {
     if (jobId.startsWith('demo')) {
       return _getDemoReport(jobId);
     }
+
+    await ensureBackendConnection();
 
     final response = await _dio.get(ApiConstants.reportPath(jobId));
     final data = response.data;
@@ -414,6 +423,80 @@ Make the report professional, well-researched, and comprehensive. Use markdown f
 
     // Fallback: take first 300 characters
     return _generateFallbackSummary(aiResponse);
+  }
+
+  Future<void> ensureBackendConnection() async {
+    final status = await checkConnectionStatus(logIfDebug: true);
+    if (!status.isConnected) {
+      throw Exception(status.message);
+    }
+  }
+
+  Future<BackendConnectionStatus> checkConnectionStatus({
+    bool logIfDebug = false,
+  }) async {
+    final candidates = <String>{
+      _activeBaseUrl,
+      ...ApiConstants.baseUrlCandidates,
+    }.toList(growable: false);
+
+    for (final candidate in candidates) {
+      final ok = await _probeHealth(candidate);
+      if (ok) {
+        _setBaseUrl(candidate);
+        final status = BackendConnectionStatus(
+          isConnected: true,
+          baseUrl: candidate,
+          message: 'Connected to backend',
+          checkedAt: DateTime.now(),
+        );
+        if (logIfDebug && kDebugMode) {
+          debugPrint('[ResearchApi] Backend connected: ${status.baseUrl}');
+        }
+        return status;
+      }
+    }
+
+    final status = BackendConnectionStatus(
+      isConnected: false,
+      baseUrl: _activeBaseUrl,
+      message:
+          'Backend unreachable. Start API on port 8000 or set API_BASE_URL.',
+      checkedAt: DateTime.now(),
+    );
+    if (logIfDebug && kDebugMode) {
+      debugPrint(
+        '[ResearchApi] Backend disconnected. Tried: ${candidates.join(', ')}',
+      );
+    }
+    return status;
+  }
+
+  Future<bool> _probeHealth(String baseUrl) async {
+    final probe = Dio(
+      BaseOptions(
+        baseUrl: baseUrl,
+        connectTimeout: const Duration(seconds: 3),
+        receiveTimeout: const Duration(seconds: 3),
+        sendTimeout: const Duration(seconds: 3),
+      ),
+    );
+
+    try {
+      final response = await probe.get(ApiConstants.healthPath);
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _setBaseUrl(String baseUrl) {
+    if (_activeBaseUrl == baseUrl) {
+      return;
+    }
+
+    _activeBaseUrl = baseUrl;
+    _dio.options.baseUrl = baseUrl;
   }
 
   String _generateFallbackSummary(String content) {

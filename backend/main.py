@@ -12,6 +12,7 @@ from typing import AsyncGenerator, Optional
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -22,12 +23,21 @@ load_dotenv()
 
 # Import agents and services
 from agents.orchestrator import OrchestratorAgent
-from agents.web_search_agent import WebSearchAgent
+from agents.search_agent import SearchAgent
+from agents.literature_agent import LiteratureAgent
+from agents.wikipedia_agent import WikipediaAgent
+from agents.news_agent import NewsAgent
+from agents.discussion_agent import DiscussionAgent
 from agents.analyzer_agent import AnalyzerAgent
-from agents.report_writer import ReportWriterAgent
+from agents.conflict_resolver_agent import ConflictResolverAgent
+from agents.synthesis_agent import SynthesisAgent
+from agents.coherence_scorer_agent import CoherenceScorerAgent
 from services.firebase_service import save_research, get_research
 from services.search_service import get_search_provider_status
+from services.pinecone_service import get_pinecone_status, upsert_evidence_chunks, query_evidence
+from services.gemini_service import get_cache_stats
 from models.research_model import ResearchRequest, ResearchReport, ResearchStatus
+from utils.payload_optimizer import truncate_text, estimate_tokens
 
 # Initialize FastAPI
 app = FastAPI(
@@ -36,11 +46,43 @@ app = FastAPI(
     version="1.0.0"
 )
 
+DEBUG_MODE = os.environ.get("DEBUG", "false").lower() == "true"
+SERVER_PORT = int(os.environ.get("PORT", 8000))
+MAX_SPECIALIST_SUMMARY_CHARS = int(os.environ.get("MAX_SPECIALIST_SUMMARY_CHARS", "700"))
+MAX_MEMORY_MATCHES = int(os.environ.get("MAX_MEMORY_MATCHES", "6"))
+MAX_MEMORY_TEXT_CHARS = int(os.environ.get("MAX_MEMORY_TEXT_CHARS", "220"))
+MAX_ANALYSIS_INPUT_CHARS = int(os.environ.get("MAX_ANALYSIS_INPUT_CHARS", "7000"))
+FAST_MODEL = os.environ.get("FAST_MODEL", os.environ.get("GENERATION_MODEL", "gemini-2.5-flash"))
+QUALITY_MODEL = os.environ.get("QUALITY_MODEL", FAST_MODEL)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://localhost:8000",
+        "http://127.0.0.1",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Initialize agents
 orchestrator = OrchestratorAgent()
-web_search = WebSearchAgent()
+search_agent = SearchAgent()
+literature_agent = LiteratureAgent()
+wikipedia_agent = WikipediaAgent()
+news_agent = NewsAgent()
+discussion_agent = DiscussionAgent()
 analyzer = AnalyzerAgent()
-report_writer = ReportWriterAgent()
+conflict_resolver = ConflictResolverAgent()
+synthesis_agent = SynthesisAgent()
+coherence_scorer = CoherenceScorerAgent()
 
 # In-memory session storage (for dev; replace with Redis in production)
 active_sessions = {}
@@ -50,9 +92,11 @@ def _build_agent_progress(phase: str, phase_message: str, status: str, error_mes
     """Create per-agent progress payload for UI status cards."""
     order = [
         ("Orchestrator", "orchestration"),
-        ("Web Search Agent", "searching"),
+        ("Specialist Agents", "searching"),
         ("Analyzer Agent", "analyzing"),
-        ("Report Writer", "writing"),
+        ("Conflict Resolver", "resolving"),
+        ("Synthesis Agent", "synthesis"),
+        ("Coherence Scorer", "coherence"),
     ]
 
     phase_index = {name: idx for idx, (_, name) in enumerate(order)}.get(phase, -1)
@@ -60,7 +104,9 @@ def _build_agent_progress(phase: str, phase_message: str, status: str, error_mes
         "orchestration": "Planning research strategy",
         "searching": "Searching and summarizing sources",
         "analyzing": "Analyzing evidence and conflicts",
-        "writing": "Writing final report",
+        "resolving": "Resolving source contradictions",
+        "synthesis": "Synthesizing final report",
+        "coherence": "Checking report coherence",
         "completed": "Finished",
         "failed": "Stopped due to error",
     }
@@ -98,11 +144,19 @@ class ResearchResponse(BaseModel):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {
+    payload = {
         "status": "ok",
         "timestamp": datetime.now().isoformat(),
+        "service": "velora-backend",
+        "port": SERVER_PORT,
+        "debug": DEBUG_MODE,
         "search": get_search_provider_status(),
+        "pinecone": get_pinecone_status(),
+        "llm_cache": get_cache_stats(),
     }
+    if DEBUG_MODE:
+        print(f"[DEBUG] /health status=ok port={SERVER_PORT}")
+    return payload
 
 @app.post("/research/start")
 async def start_research(request: ResearchRequest) -> ResearchResponse:
@@ -222,57 +276,135 @@ async def _run_research_pipeline(research_id: str):
             {"task_count": len(assignments['web_search_tasks'])}
         )
 
-        # === PHASE 2: WEB SEARCH ===
-        _track_step("searching", "Searching the web for information...", 30)
+        # === PHASE 2: SPECIALIST AGENTS (PARALLEL) ===
+        _track_step("searching", "Running specialist agents in parallel...", 30)
 
-        all_search_results = []
-        web_tasks = assignments.get('web_search_tasks', [])
+        specialist_specs = [
+            ("Search Agent", search_agent.run(query)),
+            ("Literature Agent", literature_agent.run(query)),
+            ("Wikipedia Agent", wikipedia_agent.run(query)),
+            ("News Agent", news_agent.run(query)),
+            ("Discussion Agent", discussion_agent.run(query)),
+        ]
 
-        async def _run_search_task(task: dict) -> dict:
-            result = await web_search.search_and_summarize(task['query'])
-            return {"task": task, "result": result}
+        specialist_results = []
+        pending_tasks = {
+            asyncio.create_task(coro): agent_name
+            for agent_name, coro in specialist_specs
+        }
 
-        pending_tasks = [asyncio.create_task(_run_search_task(task)) for task in web_tasks]
         completed_count = 0
+        total_specialists = len(pending_tasks)
 
-        for completed in asyncio.as_completed(pending_tasks):
-            task_result = await completed
-            task = task_result["task"]
-            search_result = task_result["result"]
+        for completed in asyncio.as_completed(list(pending_tasks.keys())):
+            agent_name = pending_tasks[completed]
+            result = await completed
             completed_count += 1
 
-            if search_result['success']:
-                all_search_results.append(search_result)
-                _append_event(session, "search_complete", {
-                    "task_id": task['id'],
-                    "query": task['query'],
-                    "result_count": search_result['result_count'],
-                    "summary": search_result['summary'][:200]
-                })
+            if result.get('success'):
+                specialist_results.append(result)
+            _append_event(session, "specialist_complete", {
+                "agent": agent_name,
+                "success": result.get('success', False),
+                "result_count": result.get('result_count', 0),
+                "error": result.get('error'),
+            })
 
-            progress = 30 + completed_count / max(len(web_tasks), 1) * 30
+            progress = 30 + completed_count / max(total_specialists, 1) * 30
             _track_step(
                 "searching",
-                f"Completed search task {completed_count}/{len(web_tasks)}",
+                f"Completed specialist {completed_count}/{total_specialists}: {agent_name}",
                 int(progress),
                 {
-                    "task_id": task['id'],
-                    "query": task['query'],
-                    "search_success": search_result.get('success', False),
-                    "search_error": search_result.get('error')
+                    "agent": agent_name,
+                    "search_success": result.get('success', False),
+                    "search_error": result.get('error'),
                 }
             )
+
+        # Persist specialist evidence to Pinecone vector memory (best-effort).
+        evidence_chunks = []
+        for result in specialist_results:
+            agent_name = result.get("agent_name", "Specialist")
+            raw_rows = result.get("raw_results", []) or []
+            if raw_rows:
+                for row in raw_rows[:6]:
+                    evidence_chunks.append(
+                        {
+                            "agent": agent_name,
+                            "title": row.get("title", ""),
+                            "url": row.get("url", ""),
+                            "source": row.get("source", ""),
+                            "text": row.get("description", row.get("content", "")),
+                        }
+                    )
+            else:
+                evidence_chunks.append(
+                    {
+                        "agent": agent_name,
+                        "title": f"{agent_name} summary",
+                        "url": "",
+                        "source": agent_name,
+                        "text": result.get("summary", ""),
+                    }
+                )
+
+        pinecone_upsert = await upsert_evidence_chunks(
+            research_id=research_id,
+            chunks=[c for c in evidence_chunks if str(c.get("text", "")).strip()],
+        )
+        _append_event(session, "vector_memory_upsert", pinecone_upsert)
 
         # === PHASE 3: ANALYSIS ===
         _track_step("analyzing", "Analyzing and synthesizing results...", 60)
 
         combined_results = "\n\n---\n\n".join([
-            s.get('summary', '') for s in all_search_results
+            f"[{s.get('agent_name', 'Specialist')}]\n"
+            f"{truncate_text(str(s.get('summary', '')), MAX_SPECIALIST_SUMMARY_CHARS)}"
+            for s in specialist_results
+            if s.get('summary')
         ])
+
+        if not combined_results.strip():
+            combined_results = "No specialist data available. Please use fallback analysis."
+
+        # Retrieve nearest evidence from Pinecone to strengthen analysis context.
+        pinecone_query = await query_evidence(
+            query_text=query,
+            research_id=research_id,
+            top_k=8,
+        )
+        _append_event(session, "vector_memory_query", {
+            "success": pinecone_query.get("success", False),
+            "matches": len(pinecone_query.get("matches", [])),
+            "reason": pinecone_query.get("reason"),
+        })
+
+        memory_context = ""
+        if pinecone_query.get("success") and pinecone_query.get("matches"):
+            lines = []
+            for idx, match in enumerate(pinecone_query.get("matches", [])[:MAX_MEMORY_MATCHES], 1):
+                metadata = match.get("metadata", {}) if isinstance(match, dict) else {}
+                lines.append(
+                    f"{idx}. [{metadata.get('agent', 'Unknown')}] "
+                    f"{metadata.get('title', '')}\n"
+                    f"   Source: {metadata.get('url', '')}\n"
+                    f"   Text: {truncate_text(str(metadata.get('text', '')), MAX_MEMORY_TEXT_CHARS)}"
+                )
+            memory_context = "\n\nPINECONE MEMORY CONTEXT\n" + "\n\n".join(lines)
+
+        analysis_input = truncate_text(combined_results + memory_context, MAX_ANALYSIS_INPUT_CHARS)
+        token_telemetry = {
+            "analysis_input_tokens_est": estimate_tokens(analysis_input),
+            "combined_results_tokens_est": estimate_tokens(combined_results),
+            "memory_context_tokens_est": estimate_tokens(memory_context),
+            "fast_model": FAST_MODEL,
+            "quality_model": QUALITY_MODEL,
+        }
 
         analysis_result = await analyzer.analyze(
             query=query,
-            search_results=combined_results,
+            search_results=analysis_input,
             analysis_focus=assignments['analysis_focus']
         )
 
@@ -299,24 +431,52 @@ async def _run_research_pipeline(research_id: str):
             "consensus": analysis_result['analysis'].get('credible_consensus', '')[:200]
         })
 
-        # === PHASE 4: REPORT WRITING ===
-        _track_step("writing", "Crafting final report...", 75)
+        # === PHASE 3.5: CONFLICT RESOLUTION ===
+        _track_step("resolving", "Resolving source conflicts and ranking credibility...", 73)
 
         raw_sources = []
-        for result in all_search_results:
+        for result in specialist_results:
             raw_sources.extend(result.get('raw_results', []))
 
-        report_result = await report_writer.write_report(
+        conflict_result = await conflict_resolver.resolve(
             query=query,
             analysis=analysis_result.get('analysis', {}),
-            raw_sources=raw_sources
+            raw_sources=raw_sources,
+            pinecone_matches=pinecone_query.get('matches', []),
+            model=FAST_MODEL,
+        )
+
+        resolved_analysis = {
+            **analysis_result.get('analysis', {}),
+            "conflict_resolution": conflict_result.get('resolved', {}),
+        }
+
+        _append_event(session, "conflict_resolved", {
+            "success": conflict_result.get("success", False),
+            "warning": conflict_result.get("warning"),
+            "resolved_conflicts": len(
+                conflict_result.get("resolved", {}).get("resolved_conflicts", [])
+            ),
+            "ranked_sources": len(
+                conflict_result.get("resolved", {}).get("source_rankings", [])
+            ),
+        })
+
+        # === PHASE 4: SYNTHESIS ===
+        _track_step("synthesis", "Synthesizing final report...", 80)
+
+        report_result = await synthesis_agent.synthesize(
+            query=query,
+            analysis=resolved_analysis,
+            raw_sources=raw_sources,
+            model=FAST_MODEL,
         )
 
         if not report_result.get('success'):
-            report_error = report_result.get('error', 'Report writing failed')
+            report_error = report_result.get('error', 'Synthesis failed')
             _track_step(
-                "writing",
-                "Report writer failed, using fallback report",
+                "synthesis",
+                "Synthesis failed, using fallback report",
                 85,
                 {"error": report_error}
             )
@@ -325,13 +485,115 @@ async def _run_research_pipeline(research_id: str):
                 "query": query,
                 "raw_report": "",
                 "sections": [],
-                "summary": f"Report fallback used because report writer failed: {report_error}"
+                "summary": f"Report fallback used because synthesis failed: {report_error}"
             }
+
+        # === PHASE 5: COHERENCE GATE ===
+        _track_step("coherence", "Scoring coherence and quality gate...", 90)
+        coherence_threshold = float(os.environ.get("COHERENCE_THRESHOLD", "90"))
+        first_score = await coherence_scorer.score(
+            query=query,
+            report_text=report_result.get("raw_report", "") or report_result.get("summary", ""),
+            model=FAST_MODEL,
+        )
+
+        retry_used = False
+        final_score = first_score
+
+        if float(first_score.get("score", 0.0)) < coherence_threshold:
+            retry_used = True
+            _append_event(session, "coherence_retry", {
+                "reason": "score_below_threshold",
+                "first_score": first_score.get("score", 0.0),
+                "threshold": coherence_threshold,
+            })
+
+            retry_guidance = (
+                "Improve structure and consistency. Address these gaps: "
+                + ", ".join(first_score.get("gaps", [])[:5])
+            )
+
+            retry_report = await synthesis_agent.synthesize(
+                query=query,
+                analysis=resolved_analysis,
+                raw_sources=raw_sources,
+                additional_guidance=retry_guidance,
+                model=QUALITY_MODEL,
+            )
+
+            if retry_report.get("success"):
+                retry_score = await coherence_scorer.score(
+                    query=query,
+                    report_text=retry_report.get("raw_report", "") or retry_report.get("summary", ""),
+                    model=QUALITY_MODEL,
+                )
+
+                if float(retry_score.get("score", 0.0)) >= float(first_score.get("score", 0.0)):
+                    report_result = retry_report
+                    final_score = retry_score
+                else:
+                    final_score = first_score
+
+        coherence_passed = float(final_score.get("score", 0.0)) >= coherence_threshold
+        _append_event(session, "coherence_scored", {
+            "passed": coherence_passed,
+            "score": final_score.get("score", 0.0),
+            "threshold": coherence_threshold,
+            "retry_used": retry_used,
+        })
 
         report_data = {
             "query": query,
             "status": ResearchStatus.COMPLETED,
             "summary": report_result['summary'],
+            "specialist_outputs": [
+                {
+                    "agent": r.get("agent_name", "Unknown Agent"),
+                    "result_count": r.get("result_count", 0),
+                    "success": r.get("success", False),
+                }
+                for r in specialist_results
+            ],
+            "vector_memory": {
+                "upsert": pinecone_upsert,
+                "query": {
+                    "success": pinecone_query.get("success", False),
+                    "matches": len(pinecone_query.get("matches", [])),
+                    "reason": pinecone_query.get("reason"),
+                },
+            },
+            "conflict_resolution": {
+                "success": conflict_result.get("success", False),
+                "warning": conflict_result.get("warning"),
+                "resolved_conflicts": len(
+                    conflict_result.get("resolved", {}).get("resolved_conflicts", [])
+                ),
+                "ranked_sources": len(
+                    conflict_result.get("resolved", {}).get("source_rankings", [])
+                ),
+                "details": conflict_result.get("resolved", {}),
+            },
+            "coherence": {
+                "threshold": coherence_threshold,
+                "passed": coherence_passed,
+                "retry_used": retry_used,
+                "score": final_score.get("score", 0.0),
+                "feedback": final_score.get("feedback", ""),
+                "gaps": final_score.get("gaps", []),
+            },
+            "rendering": {
+                "raw_markdown": report_result.get("raw_report", ""),
+                "citations": report_result.get("citations", []),
+                "image_urls": report_result.get("image_urls", []),
+                "table_count": report_result.get("table_count", 0),
+            },
+            "token_telemetry": {
+                **token_telemetry,
+                "final_report_tokens_est": estimate_tokens(
+                    report_result.get("raw_report", "") or report_result.get("summary", "")
+                ),
+                "cache": get_cache_stats(),
+            },
             "sections": [
                 {
                     "title": s.title,
@@ -346,9 +608,9 @@ async def _run_research_pipeline(research_id: str):
 
         await save_research(research_id, user_id, query, report_data)
         _track_step(
-            "writing",
+            "coherence",
             "Report complete",
-            90,
+            96,
             {"sections": len(report_result['sections'])}
         )
         _append_event(session, "report_complete", {
@@ -473,6 +735,6 @@ def _sse_event(event_type: str, data: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    debug = os.environ.get("DEBUG", "false").lower() == "true"
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=debug)
+    if DEBUG_MODE:
+        print(f"[DEBUG] Starting Velora backend on port {SERVER_PORT}")
+    uvicorn.run("main:app", host="0.0.0.0", port=SERVER_PORT, reload=DEBUG_MODE)
