@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dio/dio.dart';
@@ -18,12 +19,35 @@ class _HomeScreenState extends State<HomeScreen> {
   final FirebaseAuthService _authService = FirebaseAuthService();
   final ResearchApi _researchApi = ResearchApi();
   final TextEditingController _queryController = TextEditingController();
+  Timer? _connectionTimer;
   bool _isSubmitting = false;
+  BackendConnectionStatus? _connectionStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkBackendConnection();
+    _connectionTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _checkBackendConnection(),
+    );
+  }
 
   @override
   void dispose() {
+    _connectionTimer?.cancel();
     _queryController.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkBackendConnection() async {
+    final status = await _researchApi.checkConnectionStatus(logIfDebug: true);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _connectionStatus = status;
+    });
   }
 
   Future<void> _startResearch() async {
@@ -206,6 +230,8 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _ConnectionStatusBanner(status: _connectionStatus),
+            const SizedBox(height: 10),
             Text(
               'What do you want to research?',
               style: Theme.of(context).textTheme.headlineSmall,
@@ -288,6 +314,49 @@ class _StatusChip extends StatelessWidget {
       child: Text(
         status,
         style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _ConnectionStatusBanner extends StatelessWidget {
+  const _ConnectionStatusBanner({required this.status});
+
+  final BackendConnectionStatus? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final isConnected = status?.isConnected ?? false;
+    final color = isConnected ? AppColors.success : Colors.redAccent;
+    final text = status == null
+        ? 'Checking backend connection...'
+        : isConnected
+            ? 'Backend connected: ${status!.baseUrl}'
+            : 'Backend disconnected: ${status!.message}';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.65)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isConnected ? Icons.wifi : Icons.wifi_off,
+            color: color,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
       ),
     );
   }

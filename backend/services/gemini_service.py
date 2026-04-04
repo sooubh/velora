@@ -102,3 +102,60 @@ async def parse_json_response(system_prompt: str, user_message: str, model: str 
         raise ValueError("Gemini returned empty response for JSON parsing")
 
     return json.loads(candidate)
+
+
+async def embed_texts(
+    texts: list[str],
+    model: str = 'text-embedding-004',
+    output_dimensionality: int = 768,
+) -> list[list[float]]:
+    """
+    Generate embeddings for a list of input texts using Gemini embeddings.
+
+    Returns:
+        List of embedding vectors in the same order as input texts.
+    """
+    if not texts:
+        return []
+
+    def _extract_vectors(response_obj) -> list[list[float]]:
+        vectors: list[list[float]] = []
+
+        embeddings = getattr(response_obj, 'embeddings', None)
+        if embeddings is None and isinstance(response_obj, dict):
+            embeddings = response_obj.get('embeddings', [])
+
+        if not embeddings:
+            raise ValueError('No embeddings returned from Gemini')
+
+        for item in embeddings:
+            values = getattr(item, 'values', None)
+            if values is None and isinstance(item, dict):
+                values = item.get('values')
+            if not values:
+                raise ValueError('Embedding item missing values')
+            vectors.append([float(v) for v in values])
+
+        return vectors
+
+    for attempt in range(3):
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    get_client().models.embed_content,
+                    model=model,
+                    contents=texts,
+                    config=types.EmbedContentConfig(
+                        output_dimensionality=output_dimensionality,
+                    ),
+                ),
+                timeout=45,
+            )
+            vectors = _extract_vectors(response)
+            if len(vectors) != len(texts):
+                raise ValueError('Embedding count mismatch from Gemini response')
+            return vectors
+        except Exception:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(1)

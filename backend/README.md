@@ -37,6 +37,12 @@ TAVILY_API_KEY=tvly-xxxxxxxxxxxxx
 # Firebase
 FIREBASE_PROJECT_ID=velora-xxx
 FIREBASE_CREDENTIALS_PATH=./firebase-key.json
+
+# Pinecone
+PINECONE_API_KEY=pcsk-xxxxxxxxxxxxx
+PINECONE_HOST=https://your-index-xxxxxxxx.svc.region.pinecone.io
+PINECONE_INDEX=velora-research
+PINECONE_NAMESPACE=default
 ```
 
 ### 3. Set Up Firebase
