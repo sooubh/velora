@@ -169,3 +169,17 @@ class FinalReport {
     };
   }
 }
+
+class BackendConnectionStatus {
+  const BackendConnectionStatus({
+    required this.isConnected,
+    required this.baseUrl,
+    required this.message,
+    required this.checkedAt,
+  });
+
+  final bool isConnected;
+  final String baseUrl;
+  final String message;
+  final DateTime checkedAt;
+}
