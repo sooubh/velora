@@ -7,6 +7,150 @@
 
 ## 📐 APP OVERVIEW (MVP Scope)
 
+---
+
+## 🧭 IMPLEMENTATION / WORKING (Diagram-Aligned v2)
+
+This section upgrades the current 4-agent flow to match your new target architecture.
+
+### Target Runtime Flow
+```
+User query (Flutter) 
+  -> Orchestrator
+  -> 5 specialist agents in parallel:
+       Search | Literature | Wikipedia | News | Discussion
+  -> Shared memory store (Pinecone vector DB)
+  -> Conflict Resolver
+  -> Synthesis Agent
+  -> Coherence Scorer (must pass threshold)
+  -> Firestore save
+  -> Flutter report render
+  -> PDF export (stored to Firebase Storage)
+
+WebSocket stream runs throughout and sends live logs to app UI.
+```
+
+### Architecture Delta From Current Code
+- Keep existing: FastAPI app, orchestrator, analyzer/report flow, Firestore persistence, Flutter progress + report screens.
+- Add new: 5 source-specialist agents, explicit conflict resolver stage, explicit synthesis stage, coherence gate, shared vector memory layer, WebSocket log channel, PDF upload to Firebase Storage.
+- Refactor: existing `analyzer_agent.py` splits into `conflict_resolver_agent.py` + `coherence_scorer.py` responsibilities.
+
+### Backend Module Plan (v2)
+
+#### 1) Agents
+Create new agent modules in `backend/agents/`:
+- `search_agent.py` (Tavily + DuckDuckGo general web)
+- `literature_agent.py` (arXiv + PubMed + OpenAlex + CORE)
+- `wikipedia_agent.py` (background + definitions)
+- `news_agent.py` (NewsAPI + Tavily news fallback)
+- `discussion_agent.py` (Reddit + forums signals)
+- `conflict_resolver_agent.py` (source contradiction resolution with credibility ranking)
+- `synthesis_agent.py` (final markdown report construction + citations)
+- `coherence_scorer.py` (self-evaluation scoring and pass/fail)
+
+Keep `orchestrator.py`, but upgrade it to produce specialist-specific subtasks.
+
+#### 2) Services
+Add/extend services in `backend/services/`:
+- `vector_memory_service.py`: chunk embeddings + upsert/query against Pinecone.
+- `search_service.py`: keep current providers and add provider-specific methods used by specialist agents.
+- `firebase_service.py`: add PDF metadata and storage URL fields.
+- `stream_service.py` (new): unified event emitter for SSE + WebSocket fan-out.
+
+#### 3) Models
+Extend `backend/models/research_model.py`:
+- Add statuses for each specialist stage and post-processing stage.
+- Add `EvidenceChunk`, `ConflictItem`, `CoherenceScore`, `SourceCredibility` models.
+- Add `agent_logs` and `source_breakdown` structures for UI.
+
+#### 4) API Endpoints
+In `backend/main.py`:
+- Keep `POST /research/start`.
+- Keep `GET /research/{id}`.
+- Add `GET /research/ws/{id}` WebSocket endpoint for live event streaming.
+- Keep SSE endpoint as compatibility mode.
+- Add `POST /research/{id}/rerun-coherence` for failed coherence reruns (optional).
+
+### Flutter App Plan (v2)
+
+#### 1) Progress UI
+Update `lib/features/research/presentation/progress_screen.dart`:
+- Show 9 logical blocks:
+  1. Orchestrator
+  2. Search
+  3. Literature
+  4. Wikipedia
+  5. News
+  6. Discussion
+  7. Conflict Resolver
+  8. Synthesis
+  9. Coherence Scorer
+- Prefer WebSocket stream for real-time logs; fallback to polling.
+
+#### 2) Report UI
+Update `lib/features/research/presentation/report_screen.dart`:
+- Show coherence score badge.
+- Show source credibility summary and conflicts resolved section.
+- Keep markdown rendering and PDF export.
+
+#### 3) Data Layer
+Update `lib/features/research/data/research_api.dart`:
+- Add WebSocket client for event stream.
+- Parse specialist agent statuses and richer log events.
+- Keep existing start/status/report HTTP methods as fallback.
+
+### Phased Delivery Plan (Safe Migration)
+
+#### Phase V2.1: Pipeline Skeleton (No provider expansion yet)
+- Add new stage structure in backend pipeline with placeholder specialist outputs.
+- Add new status enums and payload shape for Flutter.
+- Update progress UI to show 9 blocks.
+
+#### Phase V2.2: Specialist Agents + Source Connectors
+- Implement Search, Wikipedia, News specialists first.
+- Then implement Literature and Discussion specialists.
+- Normalize all outputs to a shared `EvidenceChunk` schema.
+
+#### Phase V2.3: Shared Memory + Conflict/Synthesis Split
+- Add Pinecone integration and chunk memory writes per specialist.
+- Implement `conflict_resolver_agent.py` on top of normalized evidence.
+- Implement `synthesis_agent.py` as dedicated final writer.
+
+#### Phase V2.4: Coherence Gate + Retry Logic
+- Implement `coherence_scorer.py` with threshold (default 90).
+- If score below threshold: one automatic synthesis retry with stronger prompt constraints.
+- Persist both original and retried scores in Firestore.
+
+#### Phase V2.5: WebSocket Live Logs + PDF to Storage
+- Add backend WebSocket endpoint and event fan-out.
+- Wire Flutter to stream logs from WebSocket.
+- Upload generated PDF to Firebase Storage and store URL in Firestore.
+
+### Acceptance Criteria For Diagram Match
+- 5 specialist agents execute in parallel and are visible in UI.
+- Conflict resolver runs after evidence aggregation and before synthesis.
+- Synthesis output passes coherence threshold or triggers controlled retry.
+- Firestore stores report + metadata + coherence score + source credibility summary.
+- Flutter shows real-time logs and renders final markdown report.
+- PDF export is available and saved to Firebase Storage.
+
+### Suggested Environment Additions
+Add to backend `.env`:
+```
+NEWS_API_KEY=...
+REDDIT_CLIENT_ID=...
+REDDIT_CLIENT_SECRET=...
+PINECONE_API_KEY=...
+PINECONE_INDEX=velora-research
+PINECONE_NAMESPACE=prod
+COHERENCE_THRESHOLD=90
+```
+
+### Notes
+- Keep the existing endpoints and polling flow during migration to avoid breaking the app.
+- Introduce WebSocket incrementally; do not remove SSE until Flutter fully switches.
+- Start with provider adapters and strict output schemas before prompt tuning.
+
 | Item | Detail |
 |---|---|
 | **App Name** | Swarm AI |

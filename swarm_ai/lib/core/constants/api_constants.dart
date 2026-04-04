@@ -21,10 +21,42 @@ class ApiConstants {
       return 'http://10.0.2.2:8000';
     }
 
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return 'http://127.0.0.1:8000';
+    }
+
     return 'http://127.0.0.1:8000';
   }
+
+  static List<String> get baseUrlCandidates {
+    if (_configuredBaseUrl.isNotEmpty) {
+      return <String>[_configuredBaseUrl];
+    }
+
+    if (kIsWeb) {
+      return const <String>[
+        'http://127.0.0.1:8000',
+        'http://localhost:8000',
+      ];
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return const <String>[
+        'http://10.0.2.2:8000',
+        'http://127.0.0.1:8000',
+        'http://localhost:8000',
+      ];
+    }
+
+    return const <String>[
+      'http://127.0.0.1:8000',
+      'http://localhost:8000',
+    ];
+  }
+
   static const String researchPath = '/research';
   static const String startResearchPath = '$researchPath/start';
+  static const String healthPath = '/health';
 
   static String jobStatusPath(String jobId) => '$researchPath/$jobId';
   static String reportPath(String jobId) => '$researchPath/$jobId';
